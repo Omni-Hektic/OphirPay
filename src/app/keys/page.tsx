@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-scopes";
 import { useToast } from "@/components/ui/Toast";
 import { CopyButton } from "@/components/ui/CopyButton";
+import { SudoReauthModal, type SudoChallengeDetails } from "@/components/SudoReauthModal";
 
 interface ApiKeyRecord {
   id: string;
@@ -72,6 +73,23 @@ export default function ApiKeysPage() {
   // Usage-stats window
   const [window, setWindow] = useState("30d");
 
+  // Sudo re-authentication modal (#1389)
+  const [sudoOpen, setSudoOpen] = useState(false);
+  const [sudoChallenge, setSudoChallenge] = useState<SudoChallengeDetails | null>(null);
+  const [pendingAction, setPendingAction] = useState<(() => Promise<void>) | null>(null);
+  const [sudoActionName, setSudoActionName] = useState<string>("this action");
+
+  const triggerSudo = (
+    details: SudoChallengeDetails | undefined,
+    action: () => Promise<void>,
+    actionDesc: string
+  ) => {
+    setSudoChallenge(details ?? null);
+    setPendingAction(() => action);
+    setSudoActionName(actionDesc);
+    setSudoOpen(true);
+  };
+
   const { data: usage, isLoading: usageLoading, error: usageError } = useApiQuery<KeyStatsResponse>(
     ["api-keys", "stats", window],
     `/api/keys/stats?window=${window}`
@@ -129,6 +147,14 @@ export default function ApiKeysPage() {
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 403 && data?.error?.code === "SUDO_REQUIRED") {
+          triggerSudo(
+            data.error.details,
+            () => handleCreate(),
+            "create this API key"
+          );
+          return;
+        }
         throw new Error(data?.error?.message ?? "Failed to create key");
       }
       setNewRawKey(data.data.key);
@@ -156,6 +182,14 @@ export default function ApiKeysPage() {
       });
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 403 && data?.error?.code === "SUDO_REQUIRED") {
+          triggerSudo(
+            data.error.details,
+            () => handleSaveScopes(id),
+            "modify key scopes"
+          );
+          return;
+        }
         throw new Error(data?.error?.message ?? "Failed to update scopes");
       }
       toast.success("Scopes updated", "The key's permissions were saved.");
@@ -175,11 +209,25 @@ export default function ApiKeysPage() {
         method: "DELETE",
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to delete key");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 403 && data?.error?.code === "SUDO_REQUIRED") {
+          triggerSudo(
+            data.error?.details,
+            () => handleDelete(id),
+            "revoke this API key"
+          );
+          return;
+        }
+        throw new Error(data?.error?.message ?? "Failed to delete key");
+      }
       toast.success("Key revoked", "The API key can no longer be used.");
       loadKeys();
-    } catch {
-      toast.error("Delete failed", "Please try again.");
+    } catch (err) {
+      toast.error(
+        "Delete failed",
+        err instanceof Error ? err.message : "Please try again."
+      );
     }
   };
 
@@ -198,6 +246,14 @@ export default function ApiKeysPage() {
       await loadKeys();
     } catch (err) {
       const apiErr = err as ApiError;
+      if (apiErr.code === "SUDO_REQUIRED" || apiErr.status === 403) {
+        triggerSudo(
+          apiErr.details as SudoChallengeDetails | undefined,
+          () => handleRotate(key),
+          "rotate this API key"
+        );
+        return;
+      }
       toast.error("Rotation failed", apiErr.message || "Please try again.");
     } finally {
       setRotatingId(null);
@@ -461,6 +517,24 @@ export default function ApiKeysPage() {
           </ul>
         )}
       </div>
+
+      <SudoReauthModal
+        open={sudoOpen}
+        onClose={() => {
+          setSudoOpen(false);
+          setPendingAction(null);
+        }}
+        challenge={sudoChallenge}
+        actionName={sudoActionName}
+        onSuccess={async () => {
+          if (pendingAction) {
+            const action = pendingAction;
+            setPendingAction(null);
+            await action();
+          }
+        }}
+      />
     </div>
   );
 }
+

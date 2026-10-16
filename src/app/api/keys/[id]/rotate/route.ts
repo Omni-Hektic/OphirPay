@@ -14,6 +14,7 @@ import {
   hashApiKeyV1,
 } from "@/lib/api-auth";
 import { verifyCsrf } from "@/lib/csrf";
+import { requireSudo } from "@/lib/session-sudo";
 import { logger } from "@/lib/logger";
 
 const ROTATION_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -34,6 +35,9 @@ export async function POST(
 
     const auth = await getAuthContext(request);
     if (!auth) return unauthorizedError("Authentication required.");
+
+    const sudoRequired = requireSudo(request);
+    if (sudoRequired) return sudoRequired;
 
     const { id } = await params;
     const now = new Date();

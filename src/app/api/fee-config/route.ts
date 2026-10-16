@@ -15,6 +15,10 @@ import { readCacheHeaders } from "@/lib/cache";
  * Cached for a few seconds (#741). A fee config change invalidates the key
  * immediately via `invalidateCache("fee-config")` — see docs/PERFORMANCE.md
  * for the invalidation matrix.
+ *
+ * Sudo mode (#1389): Non-critical read operations proceed without interruption
+ * regardless of sudo freshness. Fee mutations are executed on-chain via
+ * Soroban contract invocation signed directly by the wallet.
  */
 export const GET = withMetrics("GET /api/fee-config", withRequestLogging(async function GET(request: Request) {
   try {

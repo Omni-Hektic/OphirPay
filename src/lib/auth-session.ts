@@ -47,10 +47,15 @@ export function getAuthSecret(): string {
 
 // ── Token sign / verify ───────────────────────────────────────
 
-interface SessionPayload {
+export interface SessionPayload {
   pk: string; // Stellar public key (G...)
   nw: string; // network: TESTNET | PUBLIC
   exp: number; // expiry (ms epoch)
+  /**
+   * Last time the wallet cryptographically proved key ownership (ms epoch).
+   * Absent on legacy tokens, which are treated as stale by sudo mode.
+   */
+  vt?: number;
 }
 
 function b64url(input: Buffer | string): string {
@@ -64,12 +69,23 @@ function signToken(body: string): string {
     .digest("base64url");
 }
 
-/** Create a signed session token for a wallet public key. */
-export function createSessionToken(publicKey: string, network: string): string {
+/**
+ * Create a signed session token for a wallet public key.
+ * `verifiedAt` is when the wallet last signed a challenge; it defaults to now
+ * (a fresh proof). Renewals without a signature must pass the existing value
+ * through (`null` = never verified, e.g. a legacy token) so they cannot
+ * launder a stale session into a fresh one.
+ */
+export function createSessionToken(
+  publicKey: string,
+  network: string,
+  verifiedAt: number | null = Date.now()
+): string {
   const payload: SessionPayload = {
     pk: publicKey,
     nw: network === "PUBLIC" ? "PUBLIC" : "TESTNET",
     exp: Date.now() + SESSION_TTL_MS,
+    ...(verifiedAt !== null ? { vt: verifiedAt } : {}),
   };
   const body = b64url(JSON.stringify(payload));
   return `${body}.${signToken(body)}`;
@@ -115,10 +131,14 @@ export function readSessionCookie(request: Request): SessionPayload | null {
 }
 
 /** Build the Set-Cookie value for a new session. */
-export function buildSessionCookie(publicKey: string, network: string): string {
+export function buildSessionCookie(
+  publicKey: string,
+  network: string,
+  verifiedAt: number | null = Date.now()
+): string {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   return (
-    `${SESSION_COOKIE_NAME}=${createSessionToken(publicKey, network)}; ` +
+    `${SESSION_COOKIE_NAME}=${createSessionToken(publicKey, network, verifiedAt)}; ` +
     `Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secure}`
   );
 }

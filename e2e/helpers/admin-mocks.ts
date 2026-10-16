@@ -97,6 +97,8 @@ export interface AdminMockState {
   keyUsage: KeyUsageRecord[];
   /** Raw key value returned by POST /api/keys. */
   createdKey: string;
+  /** Sudo-mode re-auth requirement (#1389). */
+  sudoRequired?: boolean;
 }
 
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -145,6 +147,17 @@ export async function installAdminMocks(
   await page.route("**/api/csrf", (route) =>
     fulfillJson(route, { token: "e2e-csrf-token" })
   );
+
+  // Sudo re-authentication endpoint (#1389)
+  await page.route("**/api/auth/sudo", (route) => {
+    state.sudoRequired = false;
+    return fulfillJson(route, {
+      data: {
+        sudo: true,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      },
+    });
+  });
 
   await page.route("**/api/pause-state**", (route) =>
     fulfillJson(route, {
@@ -221,6 +234,27 @@ export async function installAdminMocks(
     }
 
     if (method === "GET") return fulfillJson(route, { data: state.apiKeys });
+
+    if (state.sudoRequired && ["POST", "PATCH", "DELETE"].includes(method)) {
+      return fulfillJson(
+        route,
+        {
+          error: {
+            code: "SUDO_REQUIRED",
+            message:
+              "Re-authentication required: sign the challenge with your wallet to continue.",
+            details: {
+              publicKey: VALID_ADDRESS_A,
+              challenge: "e2e_challenge_123",
+              message: `ophirpay:sudo:${VALID_ADDRESS_A}:e2e_challenge_123`,
+              submitTo: "/api/auth/sudo",
+              windowSeconds: 900,
+            },
+          },
+        },
+        403
+      );
+    }
 
     if (method === "POST") {
       const body = (request.postDataJSON() ?? {}) as {

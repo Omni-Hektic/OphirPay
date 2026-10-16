@@ -48,6 +48,7 @@ Complete list of every endpoint declared in [`docs/openapi.yaml`](openapi.yaml).
 |---|---|
 | `/api/auth/challenge` | GET |
 | `/api/auth/session` | POST, DELETE |
+| `/api/auth/sudo` | POST |
 | `/api/csrf` | GET |
 | `/api/payments` | GET, POST |
 | `/api/payments/{id}` | GET, PATCH, DELETE |
@@ -197,6 +198,42 @@ curl -X POST "https://api.ophirpay.com/api/keys/key_01hv89q7a4mpx3n/rotate" \
 }
 ```
 > The previous key keeps authenticating until `previousKeyValidUntil` (24 hours, never past its own expiry), so you can deploy the replacement without an outage. Rotating an already-rotated, revoked, expired, or unknown key returns `400`.
+
+### Re-authenticate a Wallet Session (Sudo Mode)
+Creating, re-scoping, revoking, and rotating API keys from a **wallet session** requires a wallet signature made within the last 15 minutes. Otherwise the request fails with `403 SUDO_REQUIRED` and a challenge to sign. API-key callers are not affected.
+```json
+{
+  "success": false,
+  "error": {
+    "code": "SUDO_REQUIRED",
+    "message": "Re-authentication required: sign the challenge with your wallet to continue.",
+    "details": {
+      "publicKey": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7",
+      "challenge": "eyJwayI6IkdBQVpJ...<signed-token>",
+      "message": "ophirpay:sudo:GAAZI4TC...:eyJwayI6IkdBQVpJ...",
+      "submitTo": "/api/auth/sudo",
+      "windowSeconds": 900
+    }
+  }
+}
+```
+Sign `details.message` with the wallet, then submit it. The session cookie is re-issued and the original request can be retried:
+```bash
+curl -X POST "https://api.ophirpay.com/api/auth/sudo" \
+  -H "Content-Type: application/json" \
+  -H "x-csrf-token: <csrf-token>" \
+  -b "ophirpay_session=<session-cookie>" \
+  -d '{"challenge": "<details.challenge>", "signature": "<base64-wallet-signature>"}'
+```
+**Response (`200 OK`):**
+```json
+{
+  "success": true,
+  "data": { "sudo": true, "expiresAt": "2026-09-26T18:15:00.000Z" },
+  "meta": { "timestamp": "2026-09-26T18:00:00.000Z" }
+}
+```
+> Sudo signatures use the `ophirpay:sudo:` domain, so a login signature cannot be replayed here.
 
 ---
 

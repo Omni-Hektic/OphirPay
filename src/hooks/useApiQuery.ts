@@ -9,6 +9,8 @@ import { useQuery, useMutation, useQueryClient, type UseQueryOptions } from "@ta
 export interface ApiError {
   code: string;
   message: string;
+  status?: number;
+  details?: Record<string, unknown>;
 }
 
 // ── CSRF token (double-submit cookie pattern) ───────────────────
@@ -86,6 +88,8 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
     const err: ApiError = {
       code: body?.error?.code ?? `HTTP_${res.status}`,
       message: body?.error?.message ?? `Request failed with status ${res.status}`,
+      status: res.status,
+      details: (body?.error as { details?: Record<string, unknown> })?.details,
     };
     throw err;
   }

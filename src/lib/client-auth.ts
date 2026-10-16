@@ -86,3 +86,27 @@ export async function revokeSession(): Promise<void> {
     // Best-effort — the cookie also expires on its own
   }
 }
+
+/**
+ * Submit a signed sudo challenge to step up session authorization (#1389).
+ * Returns true if the server re-stamped the session cookie with a fresh proof.
+ */
+export async function submitSudoReauth(
+  challenge: string,
+  signature: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      "/api/auth/sudo",
+      await withCsrf({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge, signature }),
+      })
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+

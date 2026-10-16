@@ -101,6 +101,15 @@ export function challengeMessage(publicKey: string, challenge: string): string {
   return `ophirpay:login:${publicKey}:${challenge}`;
 }
 
+/**
+ * The canonical message signed for sudo-mode re-authentication (issue #1389).
+ * Uses a different domain prefix than the login message, so a captured login
+ * signature can never satisfy a sudo check (and vice versa).
+ */
+export function sudoChallengeMessage(publicKey: string, challenge: string): string {
+  return `ophirpay:sudo:${publicKey}:${challenge}`;
+}
+
 // ── Signature verification ────────────────────────────────────
 
 /**

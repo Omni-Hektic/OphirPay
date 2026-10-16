@@ -1603,6 +1603,53 @@ paths:
         "400":
           description: Invalid or missing public key
 
+  /api/auth/sudo:
+    post:
+      tags: [Session]
+      summary: Re-authenticate a wallet session for critical actions (sudo mode)
+      description: |
+        Critical administrative mutations (`POST`/`PATCH`/`DELETE /api/keys`,
+        `POST /api/keys/{id}/rotate`) require the wallet to have proved key
+        ownership within the last 15 minutes. When it has not, those routes
+        answer `403 SUDO_REQUIRED` with `error.details.challenge` and
+        `error.details.message`. Sign `message` with the wallet and submit it
+        here; on success the session cookie is re-issued with a fresh proof
+        time and the original request can be retried.
+
+        The message uses the `ophirpay:sudo:` domain, so a login signature
+        cannot be replayed against this endpoint. Machine-to-machine API keys
+        are not subject to sudo mode.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [challenge, signature]
+              properties:
+                challenge: { type: string, description: "Challenge token from the SUDO_REQUIRED response" }
+                signature: { type: string, description: "Wallet signature (base64 or hex) over the sudo message" }
+      responses:
+        "200":
+          description: Session re-authenticated; fresh cookie issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    required: [sudo, expiresAt]
+                    properties:
+                      sudo: { type: boolean }
+                      expiresAt: { type: string, format: date-time }
+        "400":
+          description: challenge and signature are required
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /api/csrf:
     get:
       tags: [Session]

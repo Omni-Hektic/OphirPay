@@ -18,6 +18,7 @@ import {
 } from "@/lib/api-auth";
 import { withRequestLogging } from "@/lib/request-logging";
 import { verifyCsrf } from "@/lib/csrf";
+import { requireSudo } from "@/lib/session-sudo";
 
 /** Validate an array of scopes against the known set. */
 function parseScopes(input: unknown): {
@@ -86,6 +87,9 @@ export const POST = withMetrics("POST /api/keys", withRequestLogging(async funct
     const auth = await getAuthContext(request);
     if (!auth) return unauthorizedError("Authentication required.");
 
+    const sudoRequired = requireSudo(request);
+    if (sudoRequired) return sudoRequired;
+
     const body = (await request.json().catch(() => ({}))) as {
       name?: string;
       scopes?: unknown;
@@ -152,6 +156,9 @@ async function __ophir_PATCH(request: Request) {
     const auth = await getAuthContext(request);
     if (!auth) return unauthorizedError("Authentication required.");
 
+    const sudoRequired = requireSudo(request);
+    if (sudoRequired) return sudoRequired;
+
     const body = (await request.json().catch(() => ({}))) as {
       id?: string;
       scopes?: unknown;
@@ -188,6 +195,9 @@ export const DELETE = withMetrics("DELETE /api/keys", withRequestLogging(async f
 
     const auth = await getAuthContext(request);
     if (!auth) return unauthorizedError("Authentication required.");
+
+    const sudoRequired = requireSudo(request);
+    if (sudoRequired) return sudoRequired;
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");

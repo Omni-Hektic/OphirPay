@@ -18,6 +18,9 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/auth-session", () => ({
   getAuthContext: mocks.getAuthContext,
+  // Sudo mode (#1389) reads the wallet session cookie; these tests exercise
+  // the API-key path (no cookie), which sudo mode exempts.
+  readSessionCookie: () => null,
 }));
 vi.mock("@/lib/csrf", () => ({
   verifyCsrf: mocks.verifyCsrf,

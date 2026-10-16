@@ -37,6 +37,7 @@ export const MUTATING_ROUTES: CsrfRouteEntry[] = [
   // Auth
   { method: "POST", path: "/api/auth/session", routeFile: "auth/session/route.ts", description: "Login / session renewal" },
   { method: "DELETE", path: "/api/auth/session", routeFile: "auth/session/route.ts", description: "Logout — clears session cookie" },
+  { method: "POST", path: "/api/auth/sudo", routeFile: "auth/sudo/route.ts", description: "Sudo-mode re-authentication — fresh wallet signature for critical actions" },
 
   // API keys
   { method: "POST", path: "/api/keys", routeFile: "keys/route.ts", description: "Generate API key" },

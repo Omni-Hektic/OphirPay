@@ -85,8 +85,13 @@ export const POST = withMetrics("POST /api/auth/session", withRequestLogging(asy
     }
   }
 
+  // Only a verified wallet signature counts as fresh proof of ownership. A
+  // bare cookie renewal must carry the previous proof time forward (null for
+  // legacy tokens), otherwise renewing would reset the sudo-mode window.
+  const verifiedAt = hasProof ? Date.now() : (existingSession?.vt ?? null);
+
   const response = successResponse({ authenticated: true, publicKey, network });
-  response.headers.set("Set-Cookie", buildSessionCookie(publicKey, network));
+  response.headers.set("Set-Cookie", buildSessionCookie(publicKey, network, verifiedAt));
   return response;
 }));
 

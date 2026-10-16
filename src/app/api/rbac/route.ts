@@ -12,6 +12,10 @@ import { enforceLookupRateLimit } from "@/lib/lookup-rate-limit";
  * GET /api/rbac — look up role assignments from the Soroban contract.
  * Reads from OphirPayContract.get_role(addr) for a specific address.
  * Use query param `addr` to look up a specific address's role.
+ *
+ * Sudo mode (#1389): Non-critical read operations proceed without interruption
+ * regardless of sudo freshness. Role mutations are executed on-chain via
+ * Soroban contract invocation signed directly by the wallet.
  */
 export const GET = withMetrics("GET /api/rbac", withRequestLogging(async function GET(request: Request) {
   try {

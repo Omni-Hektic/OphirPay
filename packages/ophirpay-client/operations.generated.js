@@ -2,7 +2,7 @@
 // GENERATED FROM docs/openapi.yaml — DO NOT EDIT BY HAND.
 // Regenerate with: npm run client:generate
 //
-// 95 operations extracted from the committed OpenAPI spec.
+// 96 operations extracted from the committed OpenAPI spec.
 
 /** @typedef {{ name: string, method: string, path: string, summary: string, tags: string[], requestBody: boolean }} ApiOperation */
 
@@ -643,6 +643,16 @@ export const API_OPERATIONS = [
     "method": "POST",
     "path": "/api/auth/session",
     "summary": "Issue a signed session cookie for a connected wallet",
+    "tags": [
+      "Session"
+    ],
+    "requestBody": true
+  },
+  {
+    "name": "postApiAuthSudo",
+    "method": "POST",
+    "path": "/api/auth/sudo",
+    "summary": "Re-authenticate a wallet session for critical actions (sudo mode)",
     "tags": [
       "Session"
     ],

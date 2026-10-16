@@ -76,6 +76,7 @@ export type ApiOperationName =
   | "patchApiRefundsId"
   | "patchApiWebhooks"
   | "postApiAuthSession"
+  | "postApiAuthSudo"
   | "postApiBatches"
   | "postApiBatchesId"
   | "postApiCron"
