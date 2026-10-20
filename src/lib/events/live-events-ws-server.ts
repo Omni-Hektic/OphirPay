@@ -29,6 +29,12 @@ import {
   type LiveEvent,
   type LiveEventSource,
 } from "./event-source";
+import {
+  incWsActiveConnections,
+  incWsBroadcastFrames,
+  incWsDisconnections,
+  type WsDisconnectReason,
+} from "@/lib/metrics-counters";
 
 export interface WsServerOptions {
   port?: number;
@@ -52,6 +58,8 @@ export const WS_MAX_BUFFERED_BYTES = 256 * 1024;
 interface WsClient {
   socket: Duplex;
   alive: boolean;
+  cleanedUp?: boolean;
+  disconnectReason?: WsDisconnectReason;
 }
 
 export class LiveEventsWsServer {
@@ -112,6 +120,7 @@ export class LiveEventsWsServer {
    */
   broadcast(payload: string): void {
     const frame = encodeFrame(OPCODE_TEXT, payload);
+    incWsBroadcastFrames(1);
     for (const client of this.clients) {
       this.sendFrame(client, frame);
     }
@@ -125,15 +134,35 @@ export class LiveEventsWsServer {
   private sendFrame(client: WsClient, frame: Buffer): void {
     const buffered = client.socket.writableLength ?? 0;
     if (buffered + frame.length > this.maxBufferedBytes) {
-      this.clients.delete(client);
-      try {
-        client.socket.destroy();
-      } catch {
-        /* already gone */
-      }
+      this.disconnectClient(client, "slow_consumer");
       return;
     }
     client.socket.write(frame);
+  }
+
+  private disconnectClient(client: WsClient, reason: WsDisconnectReason): void {
+    client.disconnectReason = reason;
+    this.clients.delete(client);
+    try {
+      client.socket.destroy();
+    } catch {
+      /* already gone */
+    }
+    this.cleanupClient(client, reason);
+  }
+
+  private cleanupClient(client: WsClient, reason: WsDisconnectReason): void {
+    if (client.cleanedUp) return;
+    client.cleanedUp = true;
+    this.clients.delete(client);
+    incWsActiveConnections(-1);
+    incWsDisconnections(reason);
+    try {
+      client.socket.removeAllListeners("data");
+      client.socket.on("error", () => {});
+    } catch {
+      /* ignore */
+    }
   }
 
   /**
@@ -148,8 +177,7 @@ export class LiveEventsWsServer {
     this.heartbeatTimer = setInterval(() => {
       for (const client of this.clients) {
         if (!client.alive) {
-          this.clients.delete(client);
-          client.socket.destroy();
+          this.disconnectClient(client, "ping_timeout");
           continue;
         }
         client.alive = false;
@@ -171,10 +199,15 @@ export class LiveEventsWsServer {
 
     for (const client of this.clients) {
       try {
-        client.socket.end(encodeFrame(OPCODE_CLOSE, Buffer.alloc(0)));
+        if (!client.socket.destroyed && !client.socket.writableEnded) {
+          client.socket.end(encodeFrame(OPCODE_CLOSE, Buffer.alloc(0)));
+        } else {
+          client.socket.destroy();
+        }
       } catch {
         client.socket.destroy();
       }
+      this.cleanupClient(client, "client_close");
     }
     this.clients.clear();
 
@@ -212,6 +245,7 @@ export class LiveEventsWsServer {
 
     const client: WsClient = { socket, alive: true };
     this.clients.add(client);
+    incWsActiveConnections(1);
 
     // Announce the connection with the same event the SSE route emits.
     socket.write(
@@ -232,14 +266,15 @@ export class LiveEventsWsServer {
       }
     });
 
-    const cleanup = () => {
-      this.clients.delete(client);
-      socket.removeAllListeners("data");
-      socket.removeAllListeners("close");
-      socket.removeAllListeners("error");
-    };
-    socket.on("close", cleanup);
-    socket.on("error", cleanup);
+    socket.on("end", () => {
+      this.cleanupClient(client, client.disconnectReason ?? "client_close");
+    });
+    socket.on("close", () => {
+      this.cleanupClient(client, client.disconnectReason ?? "client_close");
+    });
+    socket.on("error", () => {
+      this.cleanupClient(client, client.disconnectReason ?? "socket_error");
+    });
   }
 
   private handleFrame(client: WsClient, frame: { opcode: number; payload: Buffer }): void {
@@ -252,12 +287,14 @@ export class LiveEventsWsServer {
         client.alive = true;
         break;
       case OPCODE_CLOSE:
+        client.disconnectReason = "client_close";
         // Echo the close frame and close the socket.
         try {
           client.socket.end(encodeFrame(OPCODE_CLOSE, frame.payload));
         } catch {
           client.socket.destroy();
         }
+        this.cleanupClient(client, "client_close");
         break;
       case OPCODE_TEXT:
         // The official client sends no text; tolerate anything a custom

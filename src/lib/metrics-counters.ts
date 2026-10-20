@@ -38,6 +38,10 @@ const counters = {
   csp_violation_reports_total: 0,
   /** Gauge: Prisma connection pool queue wait duration in seconds (issue #1412). */
   database_pool_wait_seconds: 0,
+  /** Gauge: currently connected WebSocket clients (issue #1829). */
+  ws_active_connections: 0,
+  /** Counter: cumulative broadcast WebSocket frames sent (issue #1829). */
+  ws_broadcast_frames_total: 0,
 };
 
 /** Set the Prisma connection pool queue wait time in seconds (issue #1412). */
@@ -138,6 +142,53 @@ export function getCspReportsDroppedSnapshot(): Record<CspReportDropReason, numb
     deduplicated: cspReportsDropped.get("deduplicated") ?? 0,
     oversized: cspReportsDropped.get("oversized") ?? 0,
   };
+}
+
+export type WsDisconnectReason =
+  | "client_close"
+  | "slow_consumer"
+  | "ping_timeout"
+  | "socket_error";
+
+const wsDisconnections = new Map<WsDisconnectReason, number>([
+  ["client_close", 0],
+  ["slow_consumer", 0],
+  ["ping_timeout", 0],
+  ["socket_error", 0],
+]);
+
+/** Increment the counter for WebSocket disconnections by reason (issue #1829). */
+export function incWsDisconnections(
+  reason: WsDisconnectReason,
+  delta = 1
+): void {
+  wsDisconnections.set(reason, (wsDisconnections.get(reason) ?? 0) + delta);
+}
+
+/** Get a snapshot of WebSocket disconnection counts by reason (issue #1829). */
+export function getWsDisconnectionsSnapshot(): Record<
+  WsDisconnectReason,
+  number
+> {
+  return {
+    client_close: wsDisconnections.get("client_close") ?? 0,
+    slow_consumer: wsDisconnections.get("slow_consumer") ?? 0,
+    ping_timeout: wsDisconnections.get("ping_timeout") ?? 0,
+    socket_error: wsDisconnections.get("socket_error") ?? 0,
+  };
+}
+
+/** Increment or decrement active WebSocket connection gauge (issue #1829). */
+export function incWsActiveConnections(delta = 1): void {
+  counters.ws_active_connections = Math.max(
+    0,
+    counters.ws_active_connections + delta
+  );
+}
+
+/** Increment counter for broadcast WebSocket frames (issue #1829). */
+export function incWsBroadcastFrames(delta = 1): void {
+  counters.ws_broadcast_frames_total += delta;
 }
 
 /** Last failover snapshot read by a scrape, for diffing gauge/counter gauges. */
@@ -248,6 +299,7 @@ export function getMetricsSnapshot(): typeof counters & {
   delivery_attempts: DeliveryAttemptMetric[];
   delivery_final_outcomes: DeliveryFinalOutcomeMetric[];
   csp_reports_dropped: Record<CspReportDropReason, number>;
+  ws_disconnections: Record<WsDisconnectReason, number>;
   sse_active_connections: Array<{ route: string; count: number }>;
   sse_connection_durations: Array<{
     route: string;
@@ -268,6 +320,7 @@ export function getMetricsSnapshot(): typeof counters & {
         a.final_outcome.localeCompare(b.final_outcome)
     ),
     csp_reports_dropped: getCspReportsDroppedSnapshot(),
+    ws_disconnections: getWsDisconnectionsSnapshot(),
     sse_active_connections: getSseActiveConnections(),
     sse_connection_durations: getSseDurations(),
   };
@@ -287,6 +340,14 @@ export function resetMetricsForTest(): void {
   rpcLatencyBuckets.fill(0);
   for (const reason of ["rate_limited", "deduplicated", "oversized"] as CspReportDropReason[]) {
     cspReportsDropped.set(reason, 0);
+  }
+  for (const reason of [
+    "client_close",
+    "slow_consumer",
+    "ping_timeout",
+    "socket_error",
+  ] as WsDisconnectReason[]) {
+    wsDisconnections.set(reason, 0);
   }
   sseActiveConnections.set("events", 0);
   sseActiveConnections.set("audit-log", 0);

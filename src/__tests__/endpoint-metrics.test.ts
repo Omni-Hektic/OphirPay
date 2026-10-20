@@ -6,6 +6,9 @@ import {
   getEndpointMetrics,
   resetEndpointMetrics,
   LATENCY_BUCKET_BOUNDS,
+  incWsActiveConnections,
+  incWsBroadcastFrames,
+  incWsDisconnections,
 } from "@/lib/metrics-counters";
 import { withMetrics } from "@/lib/metrics-middleware";
 import { GET } from "@/app/api/metrics/route";
@@ -135,6 +138,27 @@ describe("per-endpoint metrics", () => {
     const entry = getEndpointMetrics()[0];
     expect(entry.statusClass).toBe("5xx");
     expect(entry.observation.errors).toBe(1);
+  });
+
+  it("exposes WebSocket Prometheus metrics when clients connect or drop (#1829)", async () => {
+    resetMetricsForTest();
+    incWsActiveConnections(3);
+    incWsBroadcastFrames(7);
+    incWsDisconnections("client_close", 2);
+    incWsDisconnections("slow_consumer", 1);
+
+    const res = await GET(authenticatedRequest());
+    const text = await res.text();
+
+    expect(text).toContain("# TYPE ophirpay_ws_active_connections gauge");
+    expect(text).toContain("ophirpay_ws_active_connections 3");
+    expect(text).toContain("# TYPE ophirpay_ws_broadcast_frames_total counter");
+    expect(text).toContain("ophirpay_ws_broadcast_frames_total 7");
+    expect(text).toContain('# TYPE ophirpay_ws_disconnections_total counter');
+    expect(text).toContain('ophirpay_ws_disconnections_total{reason="client_close"} 2');
+    expect(text).toContain('ophirpay_ws_disconnections_total{reason="slow_consumer"} 1');
+    expect(text).toContain('ophirpay_ws_disconnections_total{reason="ping_timeout"} 0');
+    expect(text).toContain('ophirpay_ws_disconnections_total{reason="socket_error"} 0');
   });
 
   it("exposes endpoint metrics on the /api/metrics endpoint", async () => {

@@ -300,6 +300,25 @@ export async function buildMetrics(): Promise<string> {
     )
   );
 
+  // ── WebSocket transport telemetry (issue #1829) ─────────────
+  lines.push(
+    "",
+    "# HELP ophirpay_ws_active_connections Currently active connected WebSocket clients",
+    "# TYPE ophirpay_ws_active_connections gauge",
+    `ophirpay_ws_active_connections ${c.ws_active_connections}`,
+    "",
+    "# HELP ophirpay_ws_disconnections_total Total WebSocket disconnections by reason",
+    "# TYPE ophirpay_ws_disconnections_total counter",
+    `ophirpay_ws_disconnections_total{reason="client_close"} ${c.ws_disconnections.client_close}`,
+    `ophirpay_ws_disconnections_total{reason="slow_consumer"} ${c.ws_disconnections.slow_consumer}`,
+    `ophirpay_ws_disconnections_total{reason="ping_timeout"} ${c.ws_disconnections.ping_timeout}`,
+    `ophirpay_ws_disconnections_total{reason="socket_error"} ${c.ws_disconnections.socket_error}`,
+    "",
+    "# HELP ophirpay_ws_broadcast_frames_total Total WebSocket frames broadcast to clients",
+    "# TYPE ophirpay_ws_broadcast_frames_total counter",
+    `ophirpay_ws_broadcast_frames_total ${c.ws_broadcast_frames_total}`
+  );
+
   // ── SSE Connection Durations (issue #1425) ──────────────────
   if (c.sse_connection_durations.length > 0) {
     lines.push(

@@ -154,6 +154,21 @@ ophirpay_sse_dropped_events_total 0
 ophirpay_sse_active_connections{route="events"} 0
 ophirpay_sse_active_connections{route="audit-log"} 0
 
+# HELP ophirpay_ws_active_connections Currently active connected WebSocket clients
+# TYPE ophirpay_ws_active_connections gauge
+ophirpay_ws_active_connections 0
+
+# HELP ophirpay_ws_disconnections_total Total WebSocket disconnections by reason
+# TYPE ophirpay_ws_disconnections_total counter
+ophirpay_ws_disconnections_total{reason="client_close"} 0
+ophirpay_ws_disconnections_total{reason="slow_consumer"} 0
+ophirpay_ws_disconnections_total{reason="ping_timeout"} 0
+ophirpay_ws_disconnections_total{reason="socket_error"} 0
+
+# HELP ophirpay_ws_broadcast_frames_total Total WebSocket frames broadcast to clients
+# TYPE ophirpay_ws_broadcast_frames_total counter
+ophirpay_ws_broadcast_frames_total 0
+
 # HELP prisma_pool_connections_busy Number of currently used database connections in the pool
 # TYPE prisma_pool_connections_busy gauge
 prisma_pool_connections_busy 0

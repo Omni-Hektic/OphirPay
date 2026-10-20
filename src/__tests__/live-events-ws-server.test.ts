@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: MIT
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import net from "node:net";
 import http from "node:http";
-import { LiveEventsWsServer } from "@/lib/events/live-events-ws-server";
+import { LiveEventsWsServer, type WsServerOptions } from "@/lib/events/live-events-ws-server";
 import {
   FrameDecoder,
   computeAcceptKey,
 } from "@/lib/events/ws-protocol";
 import type { LiveEvent, LiveEventSource } from "@/lib/events/event-source";
+import {
+  getMetricsSnapshot,
+  resetMetricsForTest,
+} from "@/lib/metrics-counters";
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -31,11 +35,12 @@ function fakeSource(): { source: LiveEventSource; emit: (e: LiveEvent) => void }
   };
 }
 
-async function startTestServer() {
+async function startTestServer(options: WsServerOptions = {}) {
   const fake = fakeSource();
   const server = new LiveEventsWsServer({
     port: 0,
     eventSourceFactory: () => fake.source,
+    ...options,
   });
   await server.listen();
   server.startEventStream();
@@ -313,4 +318,140 @@ describe("LiveEventsWsServer", () => {
 
     socket.destroy();
   });
+
+  describe("Prometheus telemetry (issue #1829)", () => {
+    beforeEach(() => {
+      resetMetricsForTest();
+    });
+
+    it("tracks active connections gauge on connect and disconnect", async () => {
+      const { server } = await startTestServer();
+      const port = server.port as number;
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(0);
+
+      const socket1 = net.createConnection({ port, host: "127.0.0.1" });
+      socket1.on("error", () => {});
+      await new Promise<void>((resolve, reject) => {
+        socket1.once("connect", () => {
+          socket1.write(handshake());
+          readUntil(socket1, Buffer.from("\r\n\r\n")).then(() => resolve(), reject);
+        });
+        socket1.once("error", reject);
+      });
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(1);
+
+      const socket2 = net.createConnection({ port, host: "127.0.0.1" });
+      socket2.on("error", () => {});
+      await new Promise<void>((resolve, reject) => {
+        socket2.once("connect", () => {
+          socket2.write(handshake());
+          readUntil(socket2, Buffer.from("\r\n\r\n")).then(() => resolve(), reject);
+        });
+        socket2.once("error", reject);
+      });
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(2);
+
+      const closed1 = new Promise<void>((resolve) => socket1.once("close", resolve));
+      socket1.write(maskedClose());
+      await closed1;
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(1);
+      expect(getMetricsSnapshot().ws_disconnections.client_close).toBe(1);
+
+      const closed2 = new Promise<void>((resolve) => socket2.once("close", resolve));
+      socket2.write(maskedClose());
+      await closed2;
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(0);
+      expect(getMetricsSnapshot().ws_disconnections.client_close).toBe(2);
+    });
+
+    it("increments ws_broadcast_frames_total on broadcast", async () => {
+      const { server, emit } = await startTestServer();
+      const port = server.port as number;
+
+      const socket = net.createConnection({ port, host: "127.0.0.1" });
+      socket.on("error", () => {});
+      const handshakeBuf = await new Promise<Buffer>((resolve, reject) => {
+        socket.once("connect", () => {
+          socket.write(handshake());
+          readUntil(socket, Buffer.from("\r\n\r\n")).then(resolve, reject);
+        });
+        socket.once("error", reject);
+      });
+      const marker = Buffer.from("\r\n\r\n");
+      const markerIdx = handshakeBuf.indexOf(marker);
+      const remainder = handshakeBuf.subarray(markerIdx + marker.length);
+      const frames = new SocketFrames(socket, remainder);
+      await frames.next();
+
+      expect(getMetricsSnapshot().ws_broadcast_frames_total).toBe(0);
+
+      emit({ id: 1, event: "payment:created", timestamp: "", paymentId: "p1", status: "COMPLETED" });
+      await frames.next();
+      expect(getMetricsSnapshot().ws_broadcast_frames_total).toBe(1);
+
+      emit({ id: 2, event: "payment:created", timestamp: "", paymentId: "p2", status: "COMPLETED" });
+      await frames.next();
+      expect(getMetricsSnapshot().ws_broadcast_frames_total).toBe(2);
+
+      socket.destroy();
+    });
+
+    it("records slow_consumer drop telemetry when per-client buffer overflows", async () => {
+      const { server, emit } = await startTestServer({ maxBufferedBytes: 10 });
+      const port = server.port as number;
+
+      const socket = net.createConnection({ port, host: "127.0.0.1" });
+      socket.on("error", () => {});
+      await new Promise<void>((resolve, reject) => {
+        socket.once("connect", () => {
+          socket.write(handshake());
+          readUntil(socket, Buffer.from("\r\n\r\n")).then(() => resolve(), reject);
+        });
+        socket.once("error", reject);
+      });
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(1);
+      expect(getMetricsSnapshot().ws_disconnections.slow_consumer).toBe(0);
+
+      const closed = new Promise<void>((resolve) => socket.once("close", resolve));
+      emit({ id: 100, event: "payment:created", timestamp: "2026-01-01", paymentId: "large_payload_evt", status: "COMPLETED" });
+
+      await closed;
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(0);
+      expect(getMetricsSnapshot().ws_disconnections.slow_consumer).toBe(1);
+    });
+
+    it("records ping_timeout drop telemetry when heartbeat expires", async () => {
+      const { server } = await startTestServer({ heartbeatMs: 30 });
+      const port = server.port as number;
+
+      const socket = net.createConnection({ port, host: "127.0.0.1" });
+      socket.on("error", () => {});
+      await new Promise<void>((resolve, reject) => {
+        socket.once("connect", () => {
+          socket.write(handshake());
+          readUntil(socket, Buffer.from("\r\n\r\n")).then(() => resolve(), reject);
+        });
+        socket.once("error", reject);
+      });
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(1);
+      expect(getMetricsSnapshot().ws_disconnections.ping_timeout).toBe(0);
+
+      const closed = new Promise<void>((resolve) => socket.once("close", resolve));
+      await closed;
+
+      expect(getMetricsSnapshot().ws_active_connections).toBe(0);
+      expect(getMetricsSnapshot().ws_disconnections.ping_timeout).toBe(1);
+    });
+  });
+
 });
