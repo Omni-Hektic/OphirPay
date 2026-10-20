@@ -26,6 +26,7 @@ import {
   processWebhookRetryQueue,
   type WebhookRetryQueueSummary,
 } from "@/lib/webhook-delivery-service";
+import { pruneApiKeyRequestLogs } from "@/lib/api-key-pruning";
 
 /**
  * Scheduled payment execution (issue #175).
@@ -75,6 +76,8 @@ interface RunSummary {
   results: ExecutionResult[];
   /** Webhook retries drained by the same run. */
   webhookRetries: WebhookRetryQueueSummary;
+  /** API key request logs pruned by retention policy (issue #1830). */
+  apiKeyLogsPruned?: number;
 }
 
 /**
@@ -278,12 +281,24 @@ async function runScheduledPayments(request: Request) {
       }
     }
 
+    // Prune stale API key request logs older than retention window (issue #1830).
+    try {
+      const pruneResult = await pruneApiKeyRequestLogs();
+      summary.apiKeyLogsPruned = pruneResult.prunedCount;
+    } catch (pruneErr) {
+      logger.error("Failed to prune stale API key request logs", {
+        error: pruneErr instanceof Error ? pruneErr.message : String(pruneErr),
+      });
+      summary.apiKeyLogsPruned = 0;
+    }
+
     logger.info("Scheduled payment run complete", {
       runId,
       picked: summary.picked,
       executed: summary.executed,
       failed: summary.failed,
       skipped: summary.skipped,
+      apiKeyLogsPruned: summary.apiKeyLogsPruned,
     });
 
     return successResponse(summary);

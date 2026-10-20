@@ -38,11 +38,18 @@ const counters = {
   csp_violation_reports_total: 0,
   /** Gauge: Prisma connection pool queue wait duration in seconds (issue #1412). */
   database_pool_wait_seconds: 0,
+  /** Counter: cumulative API key request logs pruned by retention policy (issue #1830). */
+  api_key_logs_pruned_total: 0,
 };
 
 /** Set the Prisma connection pool queue wait time in seconds (issue #1412). */
 export function setDatabasePoolWaitSeconds(seconds: number): void {
   counters.database_pool_wait_seconds = seconds;
+}
+
+/** Increment counter for pruned API key request logs (issue #1830). */
+export function incApiKeyLogsPruned(count = 1): void {
+  incMetric("api_key_logs_pruned_total", count);
 }
 
 /** Map of currently active SSE connections keyed by route (issue #1425). */

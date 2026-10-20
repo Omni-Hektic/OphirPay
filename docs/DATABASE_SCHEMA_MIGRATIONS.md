@@ -40,6 +40,7 @@ erDiagram
 | **`Refund`** | `id` (CUID) | On-chain Soroban refund ledger mapping DB states to `onChainId`. | `userId → User(id)`<br>`paymentId → Payment(id)` |
 | **`Webhook`** | `id` (CUID) | Registered endpoints receiving HMAC-signed event notifications. | `userId → User(id)` |
 | **`ApiKey`** | `id` (CUID) | Programmatic authentication storing SHA-256 `keyHash` and 8-character display `prefix`. | `userId → User(id)` |
+| **`ApiKeyRequestLog`** | `id` (CUID) | Per-request log tracking API key usage windows; pruned after 90 days. | `keyId → ApiKey(id)` |
 | **`NotificationHook`** | `id` (CUID) | Mirrors on-chain Soroban event hooks to route contract signals. | `userId → User(id)` |
 
 ---
@@ -236,7 +237,17 @@ return the same rows for the same terms, and the API contract is unchanged.
 
 ---
 
-## 6. Summary Checklist for Pull Requests
+## 6. `ApiKeyRequestLog` Retention Pruning & Index Utilization (Issue #1830)
+
+### Background & Table Growth
+High-throughput API key usage creates high write volumes in `ApiKeyRequestLog`. To prevent unbounded table growth, memory exhaustion, and slow dashboard response times:
+1. **Windowed Query Execution**: `GET /api/keys/stats` bounds lookups by `createdAt: { gte: since }` and `keyId: { in: keyIds }`. This leverages the composite index `@@index([keyId, createdAt])` to perform targeted index range scans rather than full table or relational joins.
+2. **Automated Batch Retention Pruning**: Periodic cron runs execute `pruneApiKeyRequestLogs()` to identify records older than 90 days (`createdAt < cutoff`). To prevent table locks and connection starvation in production PostgreSQL, pruning processes deletions in bounded batches of 1,000 using primary key lookups (`id: { in: idsToDelete }`).
+3. **Observability**: Every pruned record increments the Prometheus counter `ophirpay_api_key_logs_pruned_total`.
+
+---
+
+## 7. Summary Checklist for Pull Requests
 
 Before submitting a PR with database changes:
 - [ ] `prisma/schema.prisma` contains clear doc comments (`///`) on all new models/fields.

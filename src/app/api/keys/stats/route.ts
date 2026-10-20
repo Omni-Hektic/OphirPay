@@ -25,10 +25,18 @@ export async function GET(request: Request) {
       orderBy: { createdAt: "desc" },
       select: { id: true, name: true, prefix: true, lastUsed: true, createdAt: true, expiresAt: true },
     });
-    const requests = await prisma.apiKeyRequestLog.findMany({
-      where: { key: { userId: auth.userId } },
-      select: { keyId: true, createdAt: true },
-    });
+
+    const keyIds = keys.map((k) => k.id);
+    const requests =
+      keyIds.length > 0
+        ? await prisma.apiKeyRequestLog.findMany({
+            where: {
+              keyId: { in: keyIds },
+              createdAt: { gte: since },
+            },
+            select: { keyId: true, createdAt: true },
+          })
+        : [];
 
     return successResponse({ window, since, keys: aggregateApiKeyUsage(keys, requests, since) });
   } catch (err) {

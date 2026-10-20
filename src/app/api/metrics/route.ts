@@ -146,6 +146,10 @@ export async function buildMetrics(): Promise<string> {
     `ophirpay_csp_reports_dropped_total{reason="deduplicated"} ${c.csp_reports_dropped.deduplicated}`,
     `ophirpay_csp_reports_dropped_total{reason="oversized"} ${c.csp_reports_dropped.oversized}`,
     "",
+    "# HELP ophirpay_api_key_logs_pruned_total Total API key request logs pruned by retention policy",
+    "# TYPE ophirpay_api_key_logs_pruned_total counter",
+    `ophirpay_api_key_logs_pruned_total ${c.api_key_logs_pruned_total}`,
+    "",
   ];
 
   // ── Per-endpoint latency histograms + error counts ──────────
